@@ -1,11 +1,14 @@
+// File: app/staff/checkin/page.tsx
 "use client";
-import dynamic from "next/dynamic";
+
 import { useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import Loading from "@/components/Loading";
 
-const BarcodeScanner = dynamic(() => import("react-qr-barcode-scanner"), {
-  ssr: false,
-});
+const BarcodeScanner = dynamic(
+  () => import("react-qr-barcode-scanner").then((mod) => mod.default),
+  { ssr: false }
+);
 
 export default function StaffCheckInPage() {
   const [qr, setQr] = useState<string | null>(null);
@@ -18,12 +21,10 @@ export default function StaffCheckInPage() {
   const handleUpdate = useCallback(
     (_err: unknown, result?: any) => {
       if (!result) return;
-      // If result is null, do nothing
-      if (result === null) return;
-      // Use getText() method to access the QR code string
       const code =
         typeof result.getText === "function" ? result.getText() : result.text;
-      if (code === qr) return; // no re-send same code
+      if (!code || code === qr) return;
+      console.log("QR scanned:", code);
       setQr(code);
       setLoading(true);
       setFeedback(null);
@@ -31,14 +32,16 @@ export default function StaffCheckInPage() {
       fetch("/api/checkin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrCode: code }),
+        body: JSON.stringify({ token: code }), // <- now sending `token`
       })
         .then(async (res) => {
           const json = await res.json();
           if (!res.ok) throw new Error(json.message || "Check-in failed");
+          console.log("Check-in successful", json);
           setFeedback({ type: "success", text: json.message });
         })
         .catch((e: any) => {
+          console.error("Check-in error", e);
           setFeedback({ type: "error", text: e.message });
         })
         .finally(() => {
@@ -48,20 +51,33 @@ export default function StaffCheckInPage() {
     [qr]
   );
 
+  const handleError = useCallback((err: unknown) => {
+    console.error("Scanner error", err);
+    const message =
+      typeof err === "string"
+        ? err
+        : err instanceof DOMException
+        ? err.message
+        : "Unknown scanner error";
+    setFeedback({ type: "error", text: message });
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#111a22] text-white p-6 flex flex-col items-center">
-      <h1 className="text-3xl font-bold mb-6">Staff QR Check-in</h1>
+      <h1 className="text-3xl font-bold mb-2">Staff QR Check-in</h1>
+      {/* Spanish instruction added here */}
+      <p className="mb-4 text-gray-300">
+        Escanea el token y lo envía al backend para su verificación.
+      </p>
 
-      <div className="w-full max-w-lg aspect-square sm:aspect-video bg-[#192734] rounded-lg overflow-hidden shadow-lg relative">
-        <div style={{ width: "100%", height: "100%" }}>
-          <BarcodeScanner onUpdate={handleUpdate} />
-        </div>
-        <div className="absolute inset-0 pointer-events-none border-4 border-dashed border-blue-400 rounded-lg animate-pulse" />
+      <div className="w-full max-w-lg bg-[#192734] rounded-lg overflow-hidden shadow-lg relative p-4">
+        <BarcodeScanner onUpdate={handleUpdate} onError={handleError} />
+        <div className="absolute inset-0 pointer-events-none border-4 border-dashed border-blue-400 rounded-lg" />
       </div>
 
       {loading && <Loading text="Procesando..." />}
 
-      {feedback && (
+      {feedback && ( 
         <p
           className={`mt-4 p-3 rounded ${
             feedback.type === "success" ? "bg-green-700" : "bg-red-700"
